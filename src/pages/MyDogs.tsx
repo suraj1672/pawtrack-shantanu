@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 
 const MyDogs = () => {
-  const { user, userNGO } = useAuth();
+  const { user, userNGO, createNGO, refreshProfile } = useAuth();
   const { toast } = useToast();
   const { availableCollarIds, liveLoading, findReading } = useLiveSensors();
   const [search, setSearch] = useState('');
@@ -67,8 +67,29 @@ const MyDogs = () => {
       return;
     }
 
-    const fallbackNgo =
+    let fallbackNgo =
       userNGO || readStore().ngos.find(ngo => ngo.ownerId === user.id) || null;
+
+    if (!fallbackNgo) {
+      try {
+        fallbackNgo = await createNGO({
+          name: `${user.name || user.email.split('@')[0]}'s NGO`,
+          description: 'Auto-created NGO profile for an existing account.',
+          location: '',
+          logoUrl: '',
+          email: user.email,
+          phone: user.phone || '',
+        });
+        await refreshProfile();
+      } catch (err: unknown) {
+        toast({
+          title: 'Could not create NGO profile',
+          description: err instanceof Error ? err.message : 'Please try again',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
 
     if (!fallbackNgo?.id) {
       toast({ title: 'Create an NGO first', variant: 'destructive' });
