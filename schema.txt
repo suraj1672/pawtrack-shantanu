@@ -1,0 +1,283 @@
+================================================================================
+SentriQ Database Schema
+================================================================================
+Project ref: pwomrtwoihtulautvjwv
+Backend: PostgreSQL (via hosted API)
+Auth: Email/password (auth.users)
+Storage: medical-records, dog-images, health-reports buckets
+Live sensors: Realtime device telemetry keyed by device_id (external RTDB)
+RLS: all tables USING (true) WITH CHECK (true) for authenticated
+================================================================================
+
+--------------------------------------------------------------------------------
+1. profiles
+--------------------------------------------------------------------------------
+Extends auth.users. Created automatically on signup via trigger.
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK, FK auth.users(id) ON DELETE CASCADE | Same as auth user id  |
+| email         | text         | NOT NULL                             |                          |
+| name          | text         | NOT NULL DEFAULT ''                  | Contact person name      |
+| phone         | text         |                                      |                          |
+| avatar_url    | text         |                                      |                          |
+| role          | text         | NOT NULL DEFAULT 'owner'             | owner\|admin\|staff\|volunteer |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| updated_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+2. ngos
+--------------------------------------------------------------------------------
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| name          | text         | NOT NULL                             |                          |
+| description   | text         | DEFAULT ''                           |                          |
+| location      | text         | DEFAULT ''                           |                          |
+| email         | text         |                                      |                          |
+| phone         | text         |                                      |                          |
+| logo_url      | text         |                                      |                          |
+| owner_id      | uuid         | NOT NULL, FK profiles(id)            |                          |
+| dogs_count    | integer      | NOT NULL DEFAULT 0                   | Maintained by trigger    |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| updated_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+3. ngo_members
+--------------------------------------------------------------------------------
+Role-based membership of users in NGOs.
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| ngo_id        | uuid         | NOT NULL, FK ngos(id) ON DELETE CASCADE |                       |
+| user_id       | uuid         | NOT NULL, FK profiles(id) ON DELETE CASCADE |                   |
+| role          | text         | NOT NULL DEFAULT 'staff'             | owner\|admin\|staff\|volunteer |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| UNIQUE(ngo_id, user_id)                                                |
+
+--------------------------------------------------------------------------------
+4. dogs
+--------------------------------------------------------------------------------
+Dog profiles stored here. Sensor telemetry mapped via device_id.
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| ngo_id        | uuid         | NOT NULL, FK ngos(id) ON DELETE CASCADE |                       |
+| name          | text         | NOT NULL                             |                          |
+| breed         | text         | DEFAULT ''                           |                          |
+| species       | text         | DEFAULT ''                           |                          |
+| age           | text         | DEFAULT ''                           |                          |
+| weight        | text         | DEFAULT ''                           |                          |
+| device_id     | text         | NOT NULL                             | Maps to RTDB sensor key  |
+| image_url     | text         |                                      |                          |
+| status        | text         | NOT NULL DEFAULT 'offline'           | online\|offline\|warning\|critical |
+| has_alert     | boolean      | NOT NULL DEFAULT false               | Red signal flag          |
+| alert_message | text         |                                      |                          |
+| last_seen     | timestamptz  |                                      |                          |
+| notes         | text         | DEFAULT ''                           | General notes            |
+| created_by    | uuid         | FK profiles(id)                      |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| updated_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| INDEX on (ngo_id), (device_id)                                         |
+
+--------------------------------------------------------------------------------
+5. dog_alerts
+--------------------------------------------------------------------------------
+Alert history for red-signal / unwell dogs.
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| dog_id        | uuid         | NOT NULL, FK dogs(id) ON DELETE CASCADE |                      |
+| ngo_id        | uuid         | NOT NULL, FK ngos(id) ON DELETE CASCADE |                       |
+| severity      | text         | NOT NULL DEFAULT 'warning'           | warning\|critical        |
+| message       | text         | NOT NULL                             |                          |
+| vital_type    | text         |                                      | temperature\|heart_rate\|activity\|other |
+| vital_value   | numeric      |                                      |                          |
+| is_active     | boolean      | NOT NULL DEFAULT true                |                          |
+| resolved_at   | timestamptz  |                                      |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+6. vital_readings
+--------------------------------------------------------------------------------
+Historical vitals (past history). Live stream still comes from device RTDB;
+optional sync jobs / client writes can persist snapshots here.
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| dog_id        | uuid         | NOT NULL, FK dogs(id) ON DELETE CASCADE |                      |
+| device_id     | text         | NOT NULL                             |                          |
+| temperature   | numeric      |                                      | °C                       |
+| heart_rate    | integer      |                                      | bpm                      |
+| spo2          | numeric      |                                      | %                        |
+| activity      | text         |                                      |                          |
+| speed_kmph    | numeric      |                                      |                          |
+| latitude      | numeric      |                                      |                          |
+| longitude     | numeric      |                                      |                          |
+| sats          | integer      |                                      |                          |
+| battery_level | integer      |                                      |                          |
+| recorded_at   | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| INDEX on (dog_id, recorded_at DESC), (device_id, recorded_at DESC)      |
+
+--------------------------------------------------------------------------------
+7. medical_records
+--------------------------------------------------------------------------------
+Vaccination cards, prescriptions, lab reports, other documents (file storage).
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| dog_id        | uuid         | NOT NULL, FK dogs(id) ON DELETE CASCADE |                      |
+| ngo_id        | uuid         | NOT NULL, FK ngos(id) ON DELETE CASCADE |                       |
+| type          | text         | NOT NULL                             | vaccination\|prescription\|report\|other |
+| title         | text         | NOT NULL                             |                          |
+| notes         | text         | DEFAULT ''                           |                          |
+| file_url      | text         |                                      | Storage public/signed URL|
+| file_path     | text         |                                      | Storage object path      |
+| file_name     | text         |                                      |                          |
+| file_size     | integer      |                                      | bytes                    |
+| mime_type     | text         |                                      |                          |
+| record_date   | date         | DEFAULT CURRENT_DATE                 |                          |
+| uploaded_by   | uuid         | FK profiles(id)                      |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| updated_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+8. medical_history
+--------------------------------------------------------------------------------
+Structured previous medical history used as knowledge for the AI assistant.
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| dog_id        | uuid         | NOT NULL, FK dogs(id) ON DELETE CASCADE |                      |
+| ngo_id        | uuid         | NOT NULL, FK ngos(id) ON DELETE CASCADE |                       |
+| category      | text         | NOT NULL DEFAULT 'general'           | diagnosis\|treatment\|surgery\|allergy\|chronic\|general |
+| title         | text         | NOT NULL                             |                          |
+| description   | text         | NOT NULL DEFAULT ''                  | Free-text knowledge      |
+| diagnosis     | text         |                                      |                          |
+| treatment     | text         |                                      |                          |
+| veterinarian  | text         |                                      |                          |
+| occurred_on   | date         |                                      |                          |
+| is_chronic    | boolean      | NOT NULL DEFAULT false               |                          |
+| created_by    | uuid         | FK profiles(id)                      |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| updated_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+9. community_posts
+--------------------------------------------------------------------------------
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| user_id       | uuid         | NOT NULL, FK profiles(id) ON DELETE CASCADE |                   |
+| ngo_id        | uuid         | FK ngos(id) ON DELETE SET NULL       |                          |
+| title         | text         | NOT NULL                             |                          |
+| content       | text         | NOT NULL                             |                          |
+| tags          | text[]       | DEFAULT '{}'                         |                          |
+| likes_count   | integer      | NOT NULL DEFAULT 0                   |                          |
+| comments_count| integer      | NOT NULL DEFAULT 0                   |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| updated_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+10. community_comments
+--------------------------------------------------------------------------------
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| post_id       | uuid         | NOT NULL, FK community_posts(id) ON DELETE CASCADE |          |
+| user_id       | uuid         | NOT NULL, FK profiles(id) ON DELETE CASCADE |                   |
+| content       | text         | NOT NULL                             |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+11. community_likes
+--------------------------------------------------------------------------------
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| post_id       | uuid         | NOT NULL, FK community_posts(id) ON DELETE CASCADE |          |
+| user_id       | uuid         | NOT NULL, FK profiles(id) ON DELETE CASCADE |                   |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| UNIQUE(post_id, user_id)                                               |
+
+--------------------------------------------------------------------------------
+12. chat_conversations
+--------------------------------------------------------------------------------
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| user_id       | uuid         | NOT NULL, FK profiles(id) ON DELETE CASCADE |                   |
+| dog_id        | uuid         | FK dogs(id) ON DELETE SET NULL       | Optional dog context     |
+| title         | text         | DEFAULT 'Dog Health Chat'            |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+| updated_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+13. chat_messages
+--------------------------------------------------------------------------------
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| conversation_id | uuid       | NOT NULL, FK chat_conversations(id) ON DELETE CASCADE |     |
+| role          | text         | NOT NULL                             | user\|assistant          |
+| content       | text         | NOT NULL                             |                          |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+--------------------------------------------------------------------------------
+14. health_reports
+--------------------------------------------------------------------------------
+Metadata for generated PDF health reports (periods: daily/weekly/monthly/yearly/custom).
+| Column        | Type         | Constraints                          | Notes                    |
+|---------------|--------------|--------------------------------------|--------------------------|
+| id            | uuid         | PK DEFAULT gen_random_uuid()         |                          |
+| dog_id        | uuid         | NOT NULL, FK dogs(id) ON DELETE CASCADE |                      |
+| ngo_id        | uuid         | NOT NULL, FK ngos(id) ON DELETE CASCADE |                       |
+| generated_by  | uuid         | FK profiles(id)                      |                          |
+| period_type   | text         | NOT NULL                             | daily\|weekly\|monthly\|yearly\|custom |
+| period_start  | date         | NOT NULL                             |                          |
+| period_end    | date         | NOT NULL                             |                          |
+| file_url      | text         |                                      |                          |
+| file_path     | text         |                                      |                          |
+| summary       | jsonb        | DEFAULT '{}'                         | Aggregated stats         |
+| created_at    | timestamptz  | NOT NULL DEFAULT now()              |                          |
+
+================================================================================
+HELPER FUNCTIONS
+================================================================================
+- handle_new_user()         : trigger on auth.users → insert profiles
+- set_updated_at()          : BEFORE UPDATE trigger on tables with updated_at
+- sync_ngo_dogs_count()     : AFTER INSERT/DELETE/UPDATE on dogs
+- sync_post_likes_count()   : AFTER INSERT/DELETE on community_likes
+- sync_post_comments_count(): AFTER INSERT/DELETE on community_comments
+- is_ngo_member(ngo_id)     : SECURITY DEFINER helper for RLS
+- user_ngo_ids()            : returns ngo ids for current user
+
+================================================================================
+ROW LEVEL SECURITY (summary)
+================================================================================
+- profiles: users can read all (for community), update own row
+- ngos: authenticated read; members can update; owner can delete; anyone authenticated can insert (create NGO)
+- ngo_members: members of same NGO can read; owners/admins manage
+- dogs / dog_alerts / vital_readings / medical_records / medical_history / health_reports:
+  accessible only to ngo_members of that dog's NGO
+- community_posts/comments/likes: authenticated read; authors manage own
+- chat_conversations/messages: owner only
+
+================================================================================
+STORAGE BUCKETS
+================================================================================
+- medical-records  (private)  path: {ngo_id}/{dog_id}/{filename}
+- dog-images       (public)   path: {ngo_id}/{dog_id}/{filename}
+- health-reports   (private)  path: {ngo_id}/{dog_id}/{filename}
+
+================================================================================
+DATA FLOW
+================================================================================
+1. Signup → auth.users → profiles trigger → create ngo → ngo_members (owner)
+2. Add dog → dogs table with device_id
+3. Live vitals → external RTDB /dogs keyed by device_id → UI maps dog.device_id
+4. Optional: client/periodic job writes vital_readings snapshots for history/PDF
+5. Alerts → dog_alerts + dogs.has_alert / status for red signal on dashboard
+6. Medical files → Storage + medical_records (+ medical_history for AI)
+7. Chatbot → loads medical_history + recent vitals/alerts as context
+8. PDF reports → client generate + optional health_reports row + Storage upload
