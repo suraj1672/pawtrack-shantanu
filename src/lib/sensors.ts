@@ -44,7 +44,9 @@ export function parsePawtectNode(pawtect: unknown): Record<string, SensorReading
     const lat = num(node.latitude, node.lat);
     const lon = num(node.longitude, node.lon);
     const spo2 = num(node.spO2, node.spo2);
-    const now = Date.now();
+    const timestamp =
+      num(node.timestamp, node.ts, node.updatedAt, node.lastSeenAt) ??
+      (typeof node.timestamp === 'string' ? node.timestamp : undefined);
 
     const reading: SensorReading = {
       deviceId: dogKey,
@@ -60,7 +62,12 @@ export function parsePawtectNode(pawtect: unknown): Record<string, SensorReading
             ? 'Moving'
             : 'Resting'
           : 'Resting',
-      timestamp: now,
+      speedKmph: num(node.speedKmph),
+      sats: num(node.sats),
+      gpsValid: Boolean(node.gpsValid ?? (lat != null && lon != null)),
+      heartContact: typeof node.heartContact === 'boolean' ? node.heartContact : undefined,
+      wifiConnected: typeof node.wifiConnected === 'boolean' ? node.wifiConnected : undefined,
+      timestamp,
       sourcePath: `pawtect/${dogKey}`,
     };
 

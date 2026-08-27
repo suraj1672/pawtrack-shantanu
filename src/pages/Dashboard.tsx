@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLiveSensors } from '@/hooks/useLiveSensors';
 import { usePersistLiveVitals } from '@/hooks/usePersistLiveVitals';
 import { fetchDogsByNgo } from '@/lib/api';
+import { isReadingFresh, readingTimestampMs } from '@/lib/liveTelemetry';
 import { Dog as DogIcon, Activity, Thermometer, Heart, AlertTriangle, Search, Bell, Plus, Loader2 } from 'lucide-react';
 import { ref, set } from 'firebase/database';
 import { database } from '@/lib/firebase';
@@ -73,8 +74,12 @@ const Dashboard = () => {
   const enrichedDogs: Dog[] = dogs.map(dog => {
     const reading = findReading(dog.deviceId, dog.id, dog.name);
     if (!reading) return dog;
+    if (!isReadingFresh(reading)) {
+      return { ...dog, status: 'offline' };
+    }
     const temperature = Number(reading.bodyTempC ?? 0);
     const heartRate = reading.bpm ?? 0;
+    const seenAt = new Date(readingTimestampMs(reading) ?? Date.now());
     const critical = temperature > 39.5 || heartRate > 140;
     const warning = temperature > 39.2 || heartRate > 130 || (temperature > 0 && temperature < 36);
     if (critical || warning) {
@@ -89,10 +94,10 @@ const Dashboard = () => {
             : temperature > 39.2
               ? `High temperature detected - ${temperature.toFixed(1)}°C`
               : `Elevated heart rate - ${heartRate} bpm`),
-        lastSeen: new Date(),
+        lastSeen: seenAt,
       };
     }
-    return { ...dog, status: 'online', lastSeen: new Date() };
+    return { ...dog, status: 'online', lastSeen: seenAt };
   });
 
   const filtered = enrichedDogs.filter(dog =>
@@ -105,7 +110,7 @@ const Dashboard = () => {
 
   const getDogVitals = (dog: Dog): DogVitals => {
     const reading = findReading(dog.deviceId, dog.id, dog.name);
-    if (reading) {
+    if (reading && isReadingFresh(reading)) {
       return {
         temperature: Number(reading.bodyTempC ?? 0),
         heartRate: reading.bpm ?? 0,
@@ -143,36 +148,39 @@ const Dashboard = () => {
                 <Plus className="mr-2 h-4 w-4" /> Add New Dog
               </Link>
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                const deviceId = window.prompt('Device ID (e.g. DOG_001)');
-                if (!deviceId) return;
-                const temp = parseFloat(window.prompt('Temperature (°C)', '38.5') || '38.5');
-                const hr = parseInt(window.prompt('Heart rate (bpm)', '120') || '120');
-                const lat = parseFloat(window.prompt('Latitude', '0') || '0');
-                const lon = parseFloat(window.prompt('Longitude', '0') || '0');
-                const spo2 = parseFloat(window.prompt('spO2', '98') || '98');
-                const payload = {
-                  temperature: Number.isFinite(temp) ? temp : 0,
-                  heartRate: Number.isFinite(hr) ? hr : 0,
-                  latitude: Number.isFinite(lat) ? lat : 0,
-                  longitude: Number.isFinite(lon) ? lon : 0,
-                  spO2: Number.isFinite(spo2) ? spo2 : 0,
-                };
-                try {
-                  await set(ref(database, `pawtect/${deviceId}`), payload);
-                  window.alert('Test reading sent to ' + deviceId);
-                } catch (err) {
-                  // eslint-disable-next-line no-console
-                  console.error('Failed to send test reading', err);
-                  window.alert('Failed to send test reading: ' + String(err));
-                }
-              }}
-            >
-              Send test reading
-            </Button>
+            {import.meta.env.DEV && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const deviceId = window.prompt('Device ID (e.g. DOG_001)');
+                  if (!deviceId) return;
+                  const temp = parseFloat(window.prompt('Temperature (°C)', '38.5') || '38.5');
+                  const hr = parseInt(window.prompt('Heart rate (bpm)', '120') || '120');
+                  const lat = parseFloat(window.prompt('Latitude', '0') || '0');
+                  const lon = parseFloat(window.prompt('Longitude', '0') || '0');
+                  const spo2 = parseFloat(window.prompt('spO2', '98') || '98');
+                  const payload = {
+                    temperature: Number.isFinite(temp) ? temp : 0,
+                    heartRate: Number.isFinite(hr) ? hr : 0,
+                    latitude: Number.isFinite(lat) ? lat : 0,
+                    longitude: Number.isFinite(lon) ? lon : 0,
+                    spO2: Number.isFinite(spo2) ? spo2 : 0,
+                    timestamp: Date.now(),
+                  };
+                  try {
+                    await set(ref(database, `pawtect/${deviceId}`), payload);
+                    window.alert('Test reading sent to ' + deviceId);
+                  } catch (err) {
+                    // eslint-disable-next-line no-console
+                    console.error('Failed to send test reading', err);
+                    window.alert('Failed to send test reading: ' + String(err));
+                  }
+                }}
+              >
+                Send test reading
+              </Button>
+            )}
           </div>
         </div>
 

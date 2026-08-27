@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Dog, SensorReading } from '@/types';
+import { isReadingFresh, readingTimestampMs } from '@/lib/liveTelemetry';
 import { insertVitalReading, createDogAlert, resolveDogAlerts, updateDog } from '@/lib/api';
 import { readingFingerprint } from '@/lib/sensors';
 
@@ -32,6 +33,7 @@ export function usePersistLiveVitals(options: {
       for (const dog of dogsRef.current) {
         const reading = findReading(dog.deviceId, dog.id, dog.name);
         if (!reading) continue;
+        if (!isReadingFresh(reading, now)) continue;
 
         const fp = readingFingerprint(reading);
         const lastFp = lastFingerprint.current[dog.id];
@@ -48,7 +50,7 @@ export function usePersistLiveVitals(options: {
 
         const temperature = reading.bodyTempC;
         const heartRate = reading.bpm ?? 0;
-        const recordedAt = new Date();
+        const recordedAt = new Date(readingTimestampMs(reading) ?? now);
 
         try {
           await insertVitalReading({

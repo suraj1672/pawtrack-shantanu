@@ -60,6 +60,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLiveSensors } from '@/hooks/useLiveSensors';
 import { usePersistLiveVitals } from '@/hooks/usePersistLiveVitals';
+import { isReadingFresh, readingTimestampMs } from '@/lib/liveTelemetry';
 import {
   createMedicalHistory,
   fetchDogById,
@@ -163,7 +164,7 @@ const DogDetails = () => {
   }, [liveReadings, dogId, historyPeriod]);
 
   const reading = dog ? findReading(dog.deviceId, dog.id, dog.name) : null;
-  const liveData = reading
+  const liveData = reading && isReadingFresh(reading)
     ? {
         temperature: Number(reading.bodyTempC ?? 0),
         heartRate: reading.bpm ?? 0,
@@ -171,7 +172,7 @@ const DogDetails = () => {
         activity: reading.activity || 'Resting',
         batteryLevel: null as number | null,
         location: { lat: reading.lat ?? 0, lng: reading.lon ?? 0 },
-        timestamp: reading.timestamp ? new Date(Number(reading.timestamp)) : new Date(),
+        timestamp: new Date(readingTimestampMs(reading) ?? Date.now()),
         isLive: true,
         alertActive: false,
         alertMessage: undefined as string | undefined,
