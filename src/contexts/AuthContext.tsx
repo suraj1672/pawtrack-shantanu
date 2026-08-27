@@ -117,7 +117,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const createNGO = async (
     ngoData: Omit<NGO, 'id' | 'ownerId' | 'dogsCount'>
   ): Promise<NGO | null> => {
-    if (!user?.id) return null;
+    const ownerId = user?.id || readSessionUserId();
+    if (!ownerId) return null;
 
     const ngo = await createNgo({
       name: ngoData.name,
@@ -126,11 +127,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       email: ngoData.email,
       phone: ngoData.phone,
       logoUrl: ngoData.logoUrl,
-      ownerId: user.id,
+      ownerId,
     });
 
     setUserNGO(ngo);
-    setUser(prev => (prev ? { ...prev, ngoId: ngo.id } : prev));
+    setUser(prev => (prev && prev.id === ownerId ? { ...prev, ngoId: ngo.id } : prev));
     return ngo;
   };
 

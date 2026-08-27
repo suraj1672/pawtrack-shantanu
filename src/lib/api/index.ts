@@ -45,7 +45,16 @@ export async function fetchProfileWithNgo(userId: string): Promise<{ user: User;
   }
 
   const { password: _password, ...user } = rawUser;
-  const ngo = state.ngos.find(item => item.id === user.ngoId) || null;
+  const ngo =
+    state.ngos.find(item => item.id === user.ngoId) ||
+    state.ngos.find(item => item.ownerId === userId) ||
+    null;
+
+  if (ngo && user.ngoId !== ngo.id) {
+    updateUser(userId, { ngoId: ngo.id });
+    user.ngoId = ngo.id;
+  }
+
   return { user, ngo };
 }
 

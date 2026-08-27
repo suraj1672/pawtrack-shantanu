@@ -10,6 +10,7 @@ import { dogSpecies, type Dog } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLiveSensors } from '@/hooks/useLiveSensors';
 import { createDog, deleteDog, fetchDogsByNgo } from '@/lib/api';
+import { readStore } from '@/lib/localStore';
 import { Plus, Search, Trash2, Loader2, AlertTriangle, Radio } from 'lucide-react';
 import StatusBadge from '@/components/StatusBadge';
 import { Link } from 'react-router-dom';
@@ -61,7 +62,15 @@ const MyDogs = () => {
   const filtered = dogs.filter(d => d.name.toLowerCase().includes(search.toLowerCase()));
 
   const handleAddDog = async () => {
-    if (!userNGO?.id || !user?.id) {
+    if (!user?.id) {
+      toast({ title: 'Please log in again', variant: 'destructive' });
+      return;
+    }
+
+    const fallbackNgo =
+      userNGO || readStore().ngos.find(ngo => ngo.ownerId === user.id) || null;
+
+    if (!fallbackNgo?.id) {
       toast({ title: 'Create an NGO first', variant: 'destructive' });
       return;
     }
@@ -84,7 +93,7 @@ const MyDogs = () => {
     setSaving(true);
     try {
       const dog = await createDog({
-        ngoId: userNGO.id,
+        ngoId: fallbackNgo.id,
         name: formData.name,
         species,
         breed: species,
