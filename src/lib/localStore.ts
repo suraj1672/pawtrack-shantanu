@@ -111,28 +111,57 @@ export function findUserByEmail(email: string) {
   return readStore().users.find(user => user.email.trim().toLowerCase() === normalized) || null;
 }
 
-export function findStoredUserWithPassword(email: string) {
-  const normalized = email.trim().toLowerCase();
-  const users = readStore().users as Array<User & { password?: string }>;
-  return users.find(user => user.email.trim().toLowerCase() === normalized) || null;
-}
-
 export function createUser(input: {
+  id?: string;
   email: string;
-  password: string;
   name: string;
   phone?: string | null;
 }) {
   return updateStore(state => {
-    const user: User & { password: string } = {
-      id: createId('user'),
+    const user: User = {
+      id: input.id || createId('user'),
       email: input.email.trim().toLowerCase(),
       name: input.name,
       phone: input.phone || null,
       avatarUrl: null,
       role: 'owner',
       ngoId: null,
-      password: input.password,
+    };
+    state.users.push(user);
+    return user;
+  });
+}
+
+export function upsertUser(input: {
+  id: string;
+  email: string;
+  name: string;
+  phone?: string | null;
+  avatarUrl?: string | null;
+}) {
+  return updateStore(state => {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const existingIndex = state.users.findIndex(user => user.id === input.id);
+
+    if (existingIndex >= 0) {
+      state.users[existingIndex] = {
+        ...state.users[existingIndex],
+        email: normalizedEmail,
+        name: input.name || state.users[existingIndex].name,
+        phone: input.phone ?? state.users[existingIndex].phone ?? null,
+        avatarUrl: input.avatarUrl ?? state.users[existingIndex].avatarUrl ?? null,
+      };
+      return state.users[existingIndex];
+    }
+
+    const user: User = {
+      id: input.id,
+      email: normalizedEmail,
+      name: input.name,
+      phone: input.phone || null,
+      avatarUrl: input.avatarUrl || null,
+      role: 'owner',
+      ngoId: null,
     };
     state.users.push(user);
     return user;
@@ -180,5 +209,84 @@ export function updateNgoRecord(ngoId: string, updates: Partial<NGO>) {
     if (index === -1) return null;
     state.ngos[index] = { ...state.ngos[index], ...updates };
     return state.ngos[index];
+  });
+}
+
+export function migrateUserIdentity(input: {
+  fromEmail: string;
+  toUserId: string;
+  name: string;
+  phone?: string | null;
+  avatarUrl?: string | null;
+}) {
+  return updateStore(state => {
+    const normalizedEmail = input.fromEmail.trim().toLowerCase();
+    const existingIndex = state.users.findIndex(user => user.id === input.toUserId);
+    const legacyIndex = state.users.findIndex(
+      user => user.email.trim().toLowerCase() === normalizedEmail
+    );
+
+    if (existingIndex >= 0) {
+      state.users[existingIndex] = {
+        ...state.users[existingIndex],
+        email: normalizedEmail,
+        name: input.name || state.users[existingIndex].name,
+        phone: input.phone ?? state.users[existingIndex].phone ?? null,
+        avatarUrl: input.avatarUrl ?? state.users[existingIndex].avatarUrl ?? null,
+      };
+      return state.users[existingIndex];
+    }
+
+    if (legacyIndex === -1) {
+      const user: User = {
+        id: input.toUserId,
+        email: normalizedEmail,
+        name: input.name,
+        phone: input.phone || null,
+        avatarUrl: input.avatarUrl || null,
+        role: 'owner',
+        ngoId: null,
+      };
+      state.users.push(user);
+      return user;
+    }
+
+    const legacyUser = state.users[legacyIndex];
+    const oldUserId = legacyUser.id;
+    const migratedUser: User = {
+      ...legacyUser,
+      id: input.toUserId,
+      email: normalizedEmail,
+      name: input.name || legacyUser.name,
+      phone: input.phone ?? legacyUser.phone ?? null,
+      avatarUrl: input.avatarUrl ?? legacyUser.avatarUrl ?? null,
+    };
+    state.users[legacyIndex] = migratedUser;
+
+    state.ngos = state.ngos.map(ngo =>
+      ngo.ownerId === oldUserId ? { ...ngo, ownerId: input.toUserId } : ngo
+    );
+    state.communityPosts = state.communityPosts.map(post =>
+      post.userId === oldUserId ? { ...post, userId: input.toUserId } : post
+    );
+    state.communityLikes = state.communityLikes.map(like =>
+      like.userId === oldUserId ? { ...like, userId: input.toUserId } : like
+    );
+    state.chatConversations = state.chatConversations.map(conversation =>
+      conversation.userId === oldUserId
+        ? { ...conversation, userId: input.toUserId }
+        : conversation
+    );
+    state.healthReports = state.healthReports.map(report => {
+      if (report.generatedBy === oldUserId) {
+        return { ...report, generatedBy: input.toUserId };
+      }
+      if (report.userId === oldUserId) {
+        return { ...report, userId: input.toUserId };
+      }
+      return report;
+    });
+
+    return migratedUser;
   });
 }

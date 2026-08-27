@@ -1,5 +1,6 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAnalytics, type Analytics } from 'firebase/analytics';
+import { getAuth } from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
 
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -29,5 +30,6 @@ if (typeof window !== 'undefined') {
 }
 
 const database = getDatabase(app);
+const auth = getAuth(app);
 
-export { app, analytics, database, firebaseConfig };
+export { app, analytics, auth, database, firebaseConfig };
