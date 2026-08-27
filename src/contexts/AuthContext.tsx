@@ -1,13 +1,12 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import type { Session } from '@supabase/supabase-js';
-import { db } from '@/lib/supabase';
+import React, { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createNgo, fetchProfileWithNgo, updateNgo as apiUpdateNgo } from '@/lib/api';
+import { createUser, findStoredUserWithPassword } from '@/lib/localStore';
 import type { NGO, User } from '@/types';
 
 interface AuthContextType {
   user: User | null;
   userNGO: NGO | null;
-  session: Session | null;
+  session: { user: { id: string; email: string } } | null;
   loading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<boolean>;
@@ -18,7 +17,22 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
+const SESSION_KEY = 'sentriq-auth-session';
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function readSessionUserId() {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(SESSION_KEY);
+}
+
+function writeSessionUserId(userId: string | null) {
+  if (typeof window === 'undefined') return;
+  if (userId) {
+    window.localStorage.setItem(SESSION_KEY, userId);
+  } else {
+    window.localStorage.removeItem(SESSION_KEY);
+  }
+}
 
 async function loadUserState(userId: string) {
   return fetchProfileWithNgo(userId);
@@ -27,67 +41,53 @@ async function loadUserState(userId: string) {
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [userNGO, setUserNGO] = useState<NGO | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const applySession = async (nextSession: Session | null) => {
-    setSession(nextSession);
-    if (!nextSession?.user) {
+  const session = useMemo(
+    () => (user ? { user: { id: user.id, email: user.email } } : null),
+    [user]
+  );
+
+  const applyUser = async (userId: string | null) => {
+    if (!userId) {
       setUser(null);
       setUserNGO(null);
       return;
     }
-    try {
-      const { user: profile, ngo } = await loadUserState(nextSession.user.id);
-      setUser(profile);
-      setUserNGO(ngo);
-    } catch (err) {
-      console.error('Failed to load profile', err);
-      setUser({
-        id: nextSession.user.id,
-        email: nextSession.user.email || '',
-        name: nextSession.user.user_metadata?.name || '',
-        role: 'owner',
-        ngoId: null,
-      });
-      setUserNGO(null);
-    }
+
+    const { user: profile, ngo } = await loadUserState(userId);
+    setUser(profile);
+    setUserNGO(ngo);
   };
 
   useEffect(() => {
-    let mounted = true;
-
-    db.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      applySession(data.session).finally(() => {
-        if (mounted) setLoading(false);
-      });
-    });
-
-    const { data: listener } = db.auth.onAuthStateChange((_event, nextSession) => {
-      applySession(nextSession);
-    });
-
-    return () => {
-      mounted = false;
-      listener.subscription.unsubscribe();
-    };
+    const userId = readSessionUserId();
+    applyUser(userId)
+      .catch(err => {
+        console.error('Failed to restore session', err);
+        writeSessionUserId(null);
+        setUser(null);
+        setUserNGO(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const refreshProfile = async () => {
-    if (!session?.user) return;
-    const { user: profile, ngo } = await loadUserState(session.user.id);
+    const userId = readSessionUserId();
+    if (!userId) return;
+    const { user: profile, ngo } = await loadUserState(userId);
     setUser(profile);
     setUserNGO(ngo);
   };
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    const { data, error } = await db.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-    if (error) throw error;
-    await applySession(data.session);
+    const storedUser = findStoredUserWithPassword(email);
+    if (!storedUser || storedUser.password !== password) {
+      throw new Error('Invalid email or password.');
+    }
+
+    writeSessionUserId(storedUser.id);
+    await applyUser(storedUser.id);
     return true;
   };
 
@@ -97,35 +97,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     name: string,
     phone?: string
   ): Promise<boolean> => {
-    const { data, error } = await db.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        data: { name, phone: phone || null },
-      },
-    });
-    if (error) throw error;
-    if (!data.session) {
-      throw new Error(
-        'Account created, but email confirmation is required. Confirm your email, then sign in. For local setup, disable email confirmation in Auth settings.'
-      );
+    const existing = findStoredUserWithPassword(email);
+    if (existing) {
+      throw new Error('An account with this email already exists.');
     }
-    await applySession(data.session);
+
+    const created = createUser({ email, password, name, phone: phone || null });
+    writeSessionUserId(created.id);
+    await applyUser(created.id);
     return true;
   };
 
   const logout = async () => {
-    await db.auth.signOut();
+    writeSessionUserId(null);
     setUser(null);
     setUserNGO(null);
-    setSession(null);
   };
 
   const createNGO = async (
     ngoData: Omit<NGO, 'id' | 'ownerId' | 'dogsCount'>
   ): Promise<NGO | null> => {
-    const ownerId = user?.id || session?.user?.id;
-    if (!ownerId) return null;
+    if (!user?.id) return null;
 
     const ngo = await createNgo({
       name: ngoData.name,
@@ -134,7 +126,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       email: ngoData.email,
       phone: ngoData.phone,
       logoUrl: ngoData.logoUrl,
-      ownerId,
+      ownerId: user.id,
     });
 
     setUserNGO(ngo);
@@ -155,7 +147,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         userNGO,
         session,
         loading,
-        isAuthenticated: !!session || !!user,
+        isAuthenticated: Boolean(user),
         login,
         signup,
         logout,

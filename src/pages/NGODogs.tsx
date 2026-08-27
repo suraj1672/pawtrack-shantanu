@@ -1,19 +1,19 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Search, Filter, Loader2 } from "lucide-react";
-import DogCard from "@/components/DogCard";
-import { db } from "@/lib/supabase";
-import { mapDog, mapNgo } from "@/lib/mappers";
-import type { Dog, NGO } from "@/types";
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ArrowLeft, Search, Filter, Loader2 } from 'lucide-react';
+import DogCard from '@/components/DogCard';
+import { fetchDogsByNgo } from '@/lib/api';
+import { readStore } from '@/lib/localStore';
+import type { Dog, NGO } from '@/types';
 
 const NGODogs = () => {
   const { ngoId } = useParams();
   const navigate = useNavigate();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [ngo, setNgo] = useState<NGO | null>(null);
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,13 +24,10 @@ const NGODogs = () => {
     (async () => {
       setLoading(true);
       try {
-        const [{ data: ngoRow }, { data: dogRows }] = await Promise.all([
-          db.from('ngos').select('*').eq('id', ngoId).maybeSingle(),
-          db.from('dogs').select('*').eq('ngo_id', ngoId),
-        ]);
+        const [dogRows, state] = await Promise.all([fetchDogsByNgo(ngoId), Promise.resolve(readStore())]);
         if (cancelled) return;
-        setNgo(ngoRow ? mapNgo(ngoRow) : null);
-        setDogs((dogRows || []).map(mapDog));
+        setNgo(state.ngos.find(item => item.id === ngoId) || null);
+        setDogs(dogRows);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -45,7 +42,7 @@ const NGODogs = () => {
       dog.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       dog.deviceId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       dog.breed.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || dog.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || dog.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
